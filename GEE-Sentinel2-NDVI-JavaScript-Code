@@ -1,0 +1,134 @@
+//*****************************************************************************************************************************************************************//
+// This script has been developed by EAMENA Research Associate Dr. Ahmed Mahmoud @AhmedMAMahmoud to generate NDVI time series charts from Sentinel-2 satellite images.
+//*****************************************************************************************************************************************************************//
+//****************************Adding Image collections and Feature collections*************************************************************************************//
+// For this script to function you need to create a layer for your area of interest using the Geometry Tool and call it (Study_Area),
+// in addition to another layer for your point of interest or location of interest, which must be called (p), that you would like to compute the NDVI time series for. 
+//******************************************************************************************************************************************************************//
+// Import Sentinel 2 Multi spectral instrument L2A images //
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// cloud mask using Scene Classification Layer (SCL) bit values only the vegetation (4), Bare soils (5), Water (6) and unclassified (7) were ketp the rest were masked out // 
+function s2ClearSky(image) {
+      var scl = image.select('SCL');
+      var clear_sky_pixels = scl.eq(4).or(scl.eq(5)).or(scl.eq(6)).or(scl.eq(7));
+      return image.updateMask(clear_sky_pixels).divide(10000).copyProperties(image, ["system:time_start"])}
+// Define a fucntion to add a NDVI band to the image collection for NDVI time series analysis 
+function addNDVI(image){
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('ndvi')
+  return image.addBands([ndvi])
+}
+// Define a fucntion to add a Moisture index band to the image collection for NDMI time series analysis 
+function addNDMI(image){
+  var ndmi = image.normalizedDifference(['B4', 'B11']).rename('ndmi')
+  return image.addBands([ndmi])
+}
+// Define a fucntion to add a Normalized Difference Water Index (NDWI) band to the image collection for NDMI time series analysis 
+function addNDWI(image){
+  var ndwi = image.normalizedDifference(['B3', 'B8']).rename('ndwi')
+  return image.addBands([ndwi])
+}
+// Define the parameters to select the Sentinel-2 Level 2A images over your study area
+var year = 2015; // You can change the year date to the earliest date of interest avaliable
+var startDate = ee.Date.fromYMD(year, 1, 1).millis() ;
+var endDate = ee.Date(startDate).advance(10, 'year').millis() ;
+var SenImageCollection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                    .filterDate(startDate, endDate)
+                    .filterBounds(Study_Area)
+                    .filter(ee.Filter.lt("CLOUD_COVERAGE_ASSESSMENT", 0.1))
+                    .map(addNDVI).map(addNDMI).map(addNDWI);
+print('SenImageCollection', SenImageCollection); 
+var listOfimages = SenImageCollection.toList(SenImageCollection.size());
+Map.addLayer(ee.Image(listOfimages.get(0)), {bands: ['B8','B3', 'B2'], min: 0, max: 3000}, 'Sentinel_Image0');
+Map.centerObject(Study_Area);
+// Get the list of the image acquisition dates
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+var ImageDates = SenImageCollection.map(function(image){
+    return ee.Feature(null, {'date': image.date().format('YYYY-MM-dd'), 'id': image.id()});
+})
+.distinct('date')
+.aggregate_array('date');
+print ('ImageDates', ImageDates);
+//*************************************************************************************************************//
+//                             Calculate Image Differencing between two dates                                  //
+//*************************************************************************************************************//
+var prior_image = (ee.Image(listOfimages.get(0)).select(['B1','B2', 'B3', 'B4','B5','B6','B7','B8', 'B8A','B9','B11','B12']));
+var post_image = (ee.Image(listOfimages.get(10)).select(['B1','B2', 'B3', 'B4','B5','B6','B7','B8', 'B8A','B9','B11','B12']));
+var imageDiff = post_image.select(['B8']).subtract(prior_image.select(['B8']));
+print('imageDiff', imageDiff);
+Map.addLayer(imageDiff, {min: -1, max: 1, palette:['red', 'yellow', 'green']}, 'ImageDiff',false);
+
+//********************************************************************************************************//
+//                Calculate Normalized Difference Indexes (NDVI), (NDMI), (NDWI)                          //
+//********************************************************************************************************//
+var NDVI = ((prior_image.select('B8')).subtract(prior_image.select('B4'))).divide((prior_image.select('B8')).add(prior_image.select('B4')));
+var NDVI_Palette = ['red', 'yellow', 'green'];
+Map.addLayer(NDVI, {min: -1, max: 1, palette: NDVI_Palette}, 'NDVI',false);
+
+// Plot NDVI Time series chart for a location of interset 
+var NDVIchart = ui.Chart.image.series({
+  imageCollection: SenImageCollection.select('ndvi'),
+  region: P,
+  reducer: ee.Reducer.mode(),
+  scale:10,
+  }).setOptions({
+    interpolateNulls: true,
+    trendlines: {
+     0: {color: 'CC0000'}},
+    lineWidth: 3,
+    pointSize: 7,
+    series: {0: {titleTextStyle: {fontSize:30, italic: false, bold: true}}, textStyle: {fontSize: 30, bold: true}},
+    title: ' NDVI Time Series at Point (P)', titleTextStyle: {fontSize:35, italic: false, bold: true}, textStyle: {fontSize: 30, bold: true},
+    vAxis: {title: 'NDVI', titleTextStyle: {fontSize:30, italic: false, bold: true}, textStyle: {fontSize: 30, bold: true}},
+    hAxis: {title: 'Date', format: 'YYYY-MMM', titleTextStyle: {fontSize:30, italic: false, bold: true}, gridlines: {count:20, color: 'black'}, textStyle: {fontSize: 30, bold: true}},
+    legend: {textStyle: {fontSize: 30, italic: false, bold: true}}
+  });
+var NDVIbutton = ui.Button('Press to get the NDVI Time Series Chart for a Location of Interest');
+NDVIbutton.onClick(function(){
+  print(NDVIchart);
+});
+print(NDVIbutton);
+// Plot NDMI Time series chart for a location of interset 
+var NDMIchart = ui.Chart.image.series({
+  imageCollection: SenImageCollection.select('ndmi'),
+  region: P,
+  reducer: ee.Reducer.mode(),
+  scale:10,
+  }).setOptions({
+    interpolateNulls: true,
+    trendlines: {
+     0: {color: 'CC0000'}},
+    lineWidth: 3,
+    pointSize: 7,
+    series: {0: {titleTextStyle: {fontSize:30, italic: false, bold: true}}, textStyle: {fontSize: 30, bold: true}},
+    title: ' NDMI Time Series at Point (P)', titleTextStyle: {fontSize:35, italic: false, bold: true}, textStyle: {fontSize: 30, bold: true},
+    vAxis: {title: 'NDMI', titleTextStyle: {fontSize:30, italic: false, bold: true}, textStyle: {fontSize: 30, bold: true}},
+    hAxis: {title: 'Date', format: 'YYYY-MMM', titleTextStyle: {fontSize:30, italic: false, bold: true}, gridlines: {count:20, color: 'black'}, textStyle: {fontSize: 30, bold: true}},
+    legend: {textStyle: {fontSize: 30, italic: false, bold: true}}  
+  });
+var NDMIbutton = ui.Button('Press to get the NDMI Time Series Chart for a Location of Interest');
+NDMIbutton.onClick(function(){
+  print(NDMIchart);
+});
+print(NDMIbutton);
+// Plot NDWI Time series chart for a location of interset 
+var NDWIchart = ui.Chart.image.series({
+  imageCollection: SenImageCollection.select('ndwi'),
+  region: P,
+  reducer: ee.Reducer.mode(),
+  scale:10,
+  }).setOptions({
+    interpolateNulls: true,trendlines: {
+     0: {color: 'CC0000'}},
+    lineWidth: 3,
+    pointSize: 7,
+    series: {0: {titleTextStyle: {fontSize:30, italic: false, bold: true}}, textStyle: {fontSize: 30, bold: true}},
+    title: ' NDWI Time Series at Point (P)', titleTextStyle: {fontSize:35, italic: false, bold: true}, textStyle: {fontSize: 30, bold: true},
+    vAxis: {title: 'NDWI', titleTextStyle: {fontSize:30, italic: false, bold: true}, textStyle: {fontSize: 30, bold: true}},
+    hAxis: {title: 'Date', format: 'YYYY-MMM', titleTextStyle: {fontSize:30, italic: false, bold: true}, gridlines: {count:20, color: 'black'}, textStyle: {fontSize: 30, bold: true}},
+    legend: {textStyle: {fontSize: 30, italic: false, bold: true}}
+  });
+var NDWIbutton = ui.Button('Press to get the NDWI Time Series Chart for a Location of Interest');
+NDWIbutton.onClick(function(){
+  print(NDWIchart);
+});
+print(NDWIbutton);
